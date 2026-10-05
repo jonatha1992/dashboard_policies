@@ -1,4 +1,5 @@
 import logger from '../utils/logger';
+import { collectApiKeys } from './apiKeys';
 
 interface EnvValidationResult {
   isValid: boolean;
@@ -31,8 +32,9 @@ export const validateEnv = (): EnvValidationResult => {
   ];
 
   // Variables opcionales que habilitan features adicionales (no bloquean inicio)
+  // GEMINI_API_KEY no va acá: el esquema numerado (GEMINI_API_KEY1..N) no se
+  // valida mirando un nombre fijo, así que se chequea con el colector más abajo.
   const optionalVars = [
-    'GEMINI_API_KEY',
     'LOG_LEVEL',
     'NODE_ENV',
     'CORS_ORIGIN',
@@ -70,6 +72,16 @@ export const validateEnv = (): EnvValidationResult => {
     if (!value || value.trim() === '') {
       missingOptional.push(varName);
     }
+  }
+
+  // Gemini: cualquiera de GEMINI_API_KEYS, GEMINI_API_KEY o GEMINI_API_KEY1..N
+  // alcanza. Se reporta bajo el nombre del esquema vigente para que el warning
+  // diga qué escribir, no un nombre que el código ya no busca solo.
+  const geminiKeys = collectApiKeys('GEMINI_API_KEY');
+  if (geminiKeys.length === 0) {
+    missingOptional.push('GEMINI_API_KEY1');
+  } else {
+    logger.info('Gemini API keys detected', { count: geminiKeys.length });
   }
 
   // Logging de resultados

@@ -1,5 +1,44 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Policy, PolicySummary, PolicyFilters } from '../types/policy.types';
+import { collectApiKeys } from '../config/apiKeys';
+
+/**
+ * Modelo de Gemini a usar.
+ *
+ * Verificado contra la API real el 2026-08-06 con las keys en uso:
+ * `gemini-2.0-flash-exp` responde 404 "not found for API version v1beta" y la
+ * familia 2.0 estable responde 429 con quota 0 en free tier. Los alias -latest
+ * siempre apuntan a un modelo servido, así que no se vencen solos como una
+ * versión fijada.
+ *
+ * Es `flash-lite` y no `flash` por una razón medible: `gemini-flash-latest`
+ * razona antes de responder y esos tokens de razonamiento
+ * (`thoughtsTokenCount`, medido entre 383 y 652) se descuentan del mismo
+ * `maxOutputTokens`. Con el techo de 800 de acá abajo, la respuesta terminaba
+ * con `finishReason: MAX_TOKENS` y 13 tokens de JSON: cortado, y `JSON.parse`
+ * fallaba con un error que parecía del modelo y no del presupuesto.
+ * `gemini-flash-lite-latest` no razona (0 tokens) y además es 3x más rápido:
+ * 1.5 s contra 4.3 s.
+ */
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
+
+/**
+ * Errores por los que vale la pena probar la key siguiente. Cualquier otro es
+ * un bug nuestro y rotar sólo lo escondería detrás de N intentos iguales.
+ */
+function isRetryableKeyError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error ?? '')).toLowerCase();
+  const status = (error as { status?: number } | null)?.status;
+  if (status && [401, 403, 429, 500, 502, 503].includes(status)) return true;
+  return (
+    message.includes('quota') ||
+    message.includes('rate limit') ||
+    message.includes('429') ||
+    message.includes('api key not valid') ||
+    message.includes('overloaded') ||
+    message.includes('503')
+  );
+}
 
 /**
  * Interfaz que define la estructura de respuesta de insights.
@@ -25,14 +64,18 @@ interface InsightsResponse {
  * identificar riesgos potenciales y sugerir acciones correctivas.
  */
 export class AIInsightsService {
-  // Instancia del cliente de Google Generative AI (solo si hay API key)
-  private genAI: GoogleGenerativeAI | null = null;
+  /**
+   * Todas las keys de Gemini configuradas, en orden.
+   *
+   * Antes se leía una sola (`GEMINI_API_KEY`) y un 429 caía directo al análisis
+   * local, con el resto de las keys sin usar. El límite de Gemini es por
+   * proyecto de Google Cloud, así que keys de proyectos distintos suman cuota
+   * real: rotar es lo que hace que las 7 sirvan para algo.
+   */
+  private readonly apiKeys: string[];
 
   constructor() {
-    // Inicializar el cliente de Gemini solo si hay API key configurada
-    if (process.env.GEMINI_API_KEY) {
-      this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    }
+    this.apiKeys = collectApiKeys('GEMINI_API_KEY');
   }
 
   /**
@@ -49,8 +92,8 @@ export class AIInsightsService {
     summary: PolicySummary,
     filters: PolicyFilters
   ): Promise<InsightsResponse> {
-    // Si hay API key de Gemini configurada, usar análisis con IA
-    if (this.genAI) {
+    // Si hay al menos una API key de Gemini configurada, usar análisis con IA
+    if (this.apiKeys.length > 0) {
       return this.generateAIInsights(policies, summary, filters);
     }
 
@@ -77,36 +120,17 @@ export class AIInsightsService {
     const prompt = this.buildPrompt(policies, summary, filters);
 
     try {
-      // Obtener el modelo de Gemini configurado (usando versión 2.0 más reciente)
       // Construir instrucción del sistema considerando los filtros aplicados
       const filterContext = this.buildFilterContext(filters);
 
-      const model = this.genAI!.getGenerativeModel({
-        model: 'gemini-2.0-flash-exp',
-        systemInstruction: `Eres un analista de portafolios de seguros. Analiza los datos y proporciona:
+      const systemInstruction = `Eres un analista de portafolios de seguros. Analiza los datos y proporciona:
 1. Análisis de riesgos y anomalías ESPECÍFICOS para ${filterContext}
 2. 2-3 recomendaciones accionables ENFOCADAS en ${filterContext}
 Mantén las respuestas concisas (5-10 líneas total). Responde en español.
 Retorna SOLO formato JSON válido: {"insights": ["insight1", "insight2", "insight3"], "risk_flags": number}
-No incluyas texto adicional, markdown, ni explicaciones fuera del JSON.`
-      });
+No incluyas texto adicional, markdown, ni explicaciones fuera del JSON.`;
 
-      console.log('[AIInsights] Llamando a Gemini API con', policies.length, 'pólizas...');
-
-      // Generar contenido con la IA
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: 800,  // Aumentar límite para respuestas más completas
-          temperature: 0.5,      // Reducir temperatura para más consistencia
-          responseMimeType: 'application/json'  // Forzar respuesta en JSON
-        }
-      });
-
-      console.log('[AIInsights] Respuesta recibida de Gemini');
-
-      // Extraer el contenido de la respuesta
-      const content = result.response.text() || '{}';
+      const content = await this.generateWithKeyRotation(prompt, systemInstruction, policies.length);
       console.log('[AIInsights] Contenido recibido:', content.substring(0, 200));
 
       try {
@@ -149,6 +173,64 @@ No incluyas texto adicional, markdown, ni explicaciones fuera del JSON.`
       console.error(error);
       return this.generateLocalInsights(policies, summary, filters);
     }
+  }
+
+  /**
+   * Llama a Gemini probando cada key hasta que una responda.
+   *
+   * Sólo rota ante errores de cuota, auth o saturación. Un error de otra clase
+   * se propaga en el primer intento: reintentarlo con seis keys más da el mismo
+   * fallo seis veces y esconde la causa real detrás del ruido.
+   *
+   * @param prompt - Prompt con los datos del portfolio
+   * @param systemInstruction - Instrucción de sistema para el modelo
+   * @param policyCount - Cantidad de pólizas, sólo para el log
+   * @returns Texto crudo devuelto por el modelo
+   */
+  private async generateWithKeyRotation(
+    prompt: string,
+    systemInstruction: string,
+    policyCount: number
+  ): Promise<string> {
+    let lastError: unknown = null;
+
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      const model = new GoogleGenerativeAI(this.apiKeys[i]).getGenerativeModel({
+        model: GEMINI_MODEL,
+        systemInstruction
+      });
+
+      try {
+        console.log(
+          `[AIInsights] Llamando a Gemini (${GEMINI_MODEL}, key ${i + 1}/${this.apiKeys.length}) con`,
+          policyCount,
+          'pólizas...'
+        );
+
+        const result = await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            // 2048 y no 800: si alguien vuelve a poner un modelo que razona
+            // (ver GEMINI_MODEL), el razonamiento se cobra de este techo y el
+            // JSON sale truncado. Con 2048 el mismo modelo responde bien.
+            maxOutputTokens: 2048,
+            temperature: 0.5,      // Reducir temperatura para más consistencia
+            responseMimeType: 'application/json'  // Forzar respuesta en JSON
+          }
+        });
+
+        console.log('[AIInsights] Respuesta recibida de Gemini');
+        return result.response.text() || '{}';
+      } catch (error) {
+        if (!isRetryableKeyError(error)) throw error;
+        lastError = error;
+        console.warn(
+          `[AIInsights] Key ${i + 1}/${this.apiKeys.length} falló (cuota/auth/saturación); rotando.`
+        );
+      }
+    }
+
+    throw lastError ?? new Error('No hay keys de Gemini disponibles.');
   }
 
   /**
