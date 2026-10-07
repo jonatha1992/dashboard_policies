@@ -1,4 +1,4 @@
-import { query, useSQLite } from '../config/database';
+import { query, useSQLite, pool, getSQLiteDb } from '../config/database';
 import {
   Policy,
   PolicyFilters,
@@ -138,15 +138,94 @@ export class PolicyService {
    * @returns Cantidad total de pólizas insertadas exitosamente
    */
   async insertBatch(policies: Policy[]): Promise<number> {
-    let insertedCount = 0;
+    const result = await this.insertPoliciesTransaction(policies);
+    return result.insertedCount + result.updatedCount;
+  }
 
-    // Procesar cada póliza individualmente
-    for (const policy of policies) {
-      await this.insertPolicy(policy);
-      insertedCount++;
+  /**
+   * Inserta o actualiza un lote de pólizas dentro de una transacción atómica.
+   * Si ocurre un error, todos los cambios se revierten (rollback).
+   */
+  async insertPoliciesTransaction(
+    policies: Policy[]
+  ): Promise<{ insertedCount: number; updatedCount: number; updatedPolicyNumbers: string[] }> {
+    let insertedCount = 0;
+    let updatedCount = 0;
+    const updatedPolicyNumbers: string[] = [];
+
+    if (policies.length === 0) {
+      return { insertedCount, updatedCount, updatedPolicyNumbers };
     }
 
-    return insertedCount;
+    if (useSQLite) {
+      const db = await getSQLiteDb();
+      await db.run('BEGIN TRANSACTION');
+      try {
+        for (const policy of policies) {
+          const result = await this.insertPolicy(policy);
+          if (result.was_updated) {
+            updatedCount++;
+            updatedPolicyNumbers.push(policy.policy_number);
+          } else {
+            insertedCount++;
+          }
+        }
+        await db.run('COMMIT');
+      } catch (error) {
+        await db.run('ROLLBACK');
+        throw error;
+      }
+    } else {
+      if (!pool) throw new Error('Database pool not initialized');
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const policy of policies) {
+          const queryResult = await client.query(
+            `INSERT INTO policies
+             (policy_number, customer, policy_type, start_date, end_date, premium_usd, status, insured_value_usd, operation_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (policy_number) DO UPDATE SET
+               customer = EXCLUDED.customer,
+               policy_type = EXCLUDED.policy_type,
+               start_date = EXCLUDED.start_date,
+               end_date = EXCLUDED.end_date,
+               premium_usd = EXCLUDED.premium_usd,
+               status = EXCLUDED.status,
+               insured_value_usd = EXCLUDED.insured_value_usd,
+               operation_id = EXCLUDED.operation_id
+             RETURNING *, (xmax = 0) AS was_insert`,
+            [
+              policy.policy_number,
+              policy.customer,
+              policy.policy_type,
+              policy.start_date,
+              policy.end_date,
+              policy.premium_usd,
+              policy.status,
+              policy.insured_value_usd,
+              policy.operation_id
+            ]
+          );
+          const row = queryResult.rows[0];
+          const wasInsert = row.was_insert;
+          if (!wasInsert) {
+            updatedCount++;
+            updatedPolicyNumbers.push(policy.policy_number);
+          } else {
+            insertedCount++;
+          }
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    return { insertedCount, updatedCount, updatedPolicyNumbers };
   }
 
   /**

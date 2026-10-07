@@ -103,25 +103,13 @@ export class UploadController {
         validPolicies.push({ policy, rowNumber });
       }
 
-      // 7. Insertar todas las pólizas válidas en la base de datos
-      // Rastrear inserts nuevos vs updates de existentes
-      let insertedCount = 0;
-      let updatedCount = 0;
-      const updatedPolicyNumbers: string[] = [];
-
+      // 7. Insertar todas las pólizas válidas en la base de datos de manera atómica
       for (const { policy } of validPolicies) {
-        // Asignar el ID de la operación actual a la póliza para trazabilidad
         policy.operation_id = operation.id;
-
-        const result = await this.policyService.insertPolicy(policy);
-
-        if (result.was_updated) {
-          updatedCount++;
-          updatedPolicyNumbers.push(policy.policy_number);
-        } else {
-          insertedCount++;
-        }
       }
+
+      const { insertedCount, updatedCount, updatedPolicyNumbers } =
+        await this.policyService.insertPoliciesTransaction(validPolicies.map(v => v.policy));
 
       // 8. Calcular la duración total del procesamiento
       const duration = Date.now() - startTime;
