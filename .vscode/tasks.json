@@ -1,0 +1,10 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "install backend", "type": "shell", "command": "npm install", "options": { "cwd": "${workspaceFolder}/backend" }, "problemMatcher": [] },
+    { "label": "install frontend", "type": "shell", "command": "npm install", "options": { "cwd": "${workspaceFolder}/frontend" }, "problemMatcher": [] },
+    { "label": "run backend", "type": "shell", "command": "npm run dev", "options": { "cwd": "${workspaceFolder}/backend" }, "isBackground": true, "problemMatcher": [] },
+    { "label": "run frontend", "type": "shell", "command": "npm run dev -- --host 127.0.0.1", "options": { "cwd": "${workspaceFolder}/frontend" }, "isBackground": true, "problemMatcher": [] },
+    { "label": "test backend", "type": "shell", "command": "npm test", "options": { "cwd": "${workspaceFolder}/backend" }, "problemMatcher": [] }
+  ]
+}

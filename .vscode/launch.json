@@ -1,0 +1,9 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "name": "Backend API: dashboard_polizas", "type": "node-terminal", "request": "launch", "command": "npm run dev", "cwd": "${workspaceFolder}/backend" },
+    { "name": "Frontend Vite: dashboard_polizas", "type": "node-terminal", "request": "launch", "command": "npm run dev -- --host 127.0.0.1", "cwd": "${workspaceFolder}/frontend", "serverReadyAction": { "pattern": "Local:.*(https?://\\S+)", "uriFormat": "%s", "action": "debugWithChrome" } },
+    { "name": "Backend tests: dashboard_polizas", "type": "node-terminal", "request": "launch", "command": "npm test", "cwd": "${workspaceFolder}/backend" }
+  ],
+  "compounds": [{ "name": "Dashboard: frontend + backend", "configurations": ["Backend API: dashboard_polizas", "Frontend Vite: dashboard_polizas"] }]
+}
