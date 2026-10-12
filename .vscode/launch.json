@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend (Express)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "name": "Frontend (Vite)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev -- --host 127.0.0.1",
+      "cwd": "${workspaceFolder}/frontend"
+    },
+    {
+      "name": "Tests backend (Jest)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm test -- --runInBand",
+      "cwd": "${workspaceFolder}/backend"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Dashboard (backend + frontend)",
+      "configurations": [
+        "Backend (Express)",
+        "Frontend (Vite)"
+      ],
+      "stopAll": true
+    }
+  ]
+}
