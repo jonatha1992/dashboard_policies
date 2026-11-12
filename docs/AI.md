@@ -89,7 +89,7 @@ AIController
     ▼
 AIInsightsService
     ├─ Google Gemini (si GEMINI_API_KEY existe)
-    │   ├─ Modelo: gemini-2.0-flash-exp
+    │   ├─ Modelo: gemini-flash-latest
     │   ├─ Análisis avanzado en la nube
     │   ├─ Context-aware prompts
     │   └─ Recomendaciones específicas por filtro
@@ -186,7 +186,7 @@ async generateInsights(
 GEMINI_API_KEY=AIzaSy...
 ```
 
-**Modelo usado:** `gemini-2.0-flash-exp`
+**Modelo usado:** `gemini-flash-latest`
 - ✅ Más rápido (~0.5-1 segundo)
 - ✅ Gratis durante preview experimental
 - ✅ Context window: 1M tokens

@@ -45,7 +45,10 @@
       "command": "npm",
       "args": [
         "run",
-        "dev"
+        "dev",
+        "--",
+        "--host",
+        "127.0.0.1"
       ],
       "options": {
         "cwd": "${workspaceFolder}/frontend"

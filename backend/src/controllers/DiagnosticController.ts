@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { checkConnection } from '../config/database';
 import { validateEnv } from '../config/validateEnv';
+import { collectApiKeys } from '../config/apiKeys';
 import logger from '../utils/logger';
 
 interface DiagnosticResult {
@@ -107,8 +108,10 @@ export class DiagnosticController {
       }
 
       // CHECK 3: Verificar servicios opcionales
-      const geminiKey = process.env.GEMINI_API_KEY;
-      if (geminiKey && geminiKey.trim() !== '') {
+      // Se usa el colector, no un nombre fijo: leer sólo GEMINI_API_KEY hacía que
+      // el diagnóstico reportara "sin IA" con siete keys numeradas cargadas.
+      const geminiKeys = collectApiKeys('GEMINI_API_KEY');
+      if (geminiKeys.length > 0) {
         result.checks.services.gemini_configured = true;
         result.checks.services.ai_enabled = true;
       }

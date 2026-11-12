@@ -13,7 +13,12 @@
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run dev -- --host 127.0.0.1",
-      "cwd": "${workspaceFolder}/frontend"
+      "cwd": "${workspaceFolder}/frontend",
+      "serverReadyAction": {
+        "pattern": "Local:.*(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
     },
     {
       "name": "Tests backend (Jest)",

@@ -1,11 +1,18 @@
 import { Request, Response, NextFunction } from 'express';
+<<<<<<< HEAD
 import crypto from 'crypto';
+=======
+>>>>>>> origin/dev
 import logger from '../utils/logger';
 
 /**
  * Middleware para validar el header x-api-key.
+<<<<<<< HEAD
  * Compara el key enviado por el cliente con el configurado en el servidor (API_KEY)
  * utilizando comparación en tiempo constante para mitigar timing attacks.
+=======
+ * Compara el key enviado por el cliente con el configurado en el servidor (API_KEY).
+>>>>>>> origin/dev
  */
 export const apiKeyMiddleware = (req: Request, res: Response, next: NextFunction) => {
     // Eximir endpoints públicos (salud y documentación)
@@ -17,6 +24,7 @@ export const apiKeyMiddleware = (req: Request, res: Response, next: NextFunction
     const apiKey = req.headers['x-api-key'];
     const configuredApiKey = process.env.API_KEY;
 
+<<<<<<< HEAD
     // Si no hay key configurado en el servidor en producción, fallar de manera segura
     if (!configuredApiKey) {
         if (process.env.NODE_ENV === 'production') {
@@ -56,6 +64,20 @@ export const apiKeyMiddleware = (req: Request, res: Response, next: NextFunction
             path: req.path,
             method: req.method,
             correlation_id: req.correlationId
+=======
+    // Si no hay key configurado en el servidor, permitir pasar (para evitar bloqueo accidental)
+    if (!configuredApiKey) {
+        return next();
+    }
+
+    // Validar que el cliente envió el key y que coincide
+    if (!apiKey || apiKey !== configuredApiKey) {
+        logger.warn('Unauthorized API access attempt', {
+            path: req.path,
+            method: req.method,
+            correlation_id: req.correlationId,
+            has_key: !!apiKey
+>>>>>>> origin/dev
         });
 
         return res.status(401).json({
@@ -64,5 +86,9 @@ export const apiKeyMiddleware = (req: Request, res: Response, next: NextFunction
         });
     }
 
+<<<<<<< HEAD
+=======
+    // Si coincide, continuar
+>>>>>>> origin/dev
     next();
 };
